@@ -11,6 +11,25 @@ import time
 from scipy import signal
 from brian2 import *
 
+class ProgressBar(object):
+    def __init__(self, toolbar_width=40):
+        self.toolbar_width = toolbar_width
+        self.ticks = 0
+    def __call__(self, elapsed, complete, start, duration):
+        if complete == 0.0:
+            # setup toolbar
+            sys.stdout.write("[%s]" % (" " * self.toolbar_width))
+            sys.stdout.flush()
+            sys.stdout.write("\b" * (self.toolbar_width + 1)) # return to start of˓→line, after '['
+        else:
+            ticks_needed = int(round(complete * self.toolbar_width))
+            if self.ticks < ticks_needed:
+                sys.stdout.write("-" * (ticks_needed-self.ticks))
+                sys.stdout.flush()
+                self.ticks = ticks_needed
+        if complete == 1.0:
+            sys.stdout.write("\n")
+
 #%%
 
 defaultclock.dt = 0.05*ms
@@ -19,26 +38,45 @@ running_time = 10000*ms
 
 step_temporale= 0.00005
 
-n_split = 10        #numero di split con cui dividere i dati per applicare il welch method
+n_split = 20        #numero di split con cui dividere i dati per applicare il welch method
 num_medie = 10
 
 control_values = np.linspace(0., 1., 8)
-r = control_values[7]       #scelgo quale parametro di r studiare
+r = control_values[6]       #scelgo quale parametro di r studiare
 
-def single_firingrate(dic):
-    firingrates = []
-    for i in range(len(dic)):
-        firingrates.append(len(dic[i])/(running_time / second))
-    return(firingrates)
+def single_firingrate(n, *args):
+    '''n è il numero di dizionari che vengono passati '''
+    fr_names = ['fr%d'%k for k in range(n)]
+    fr = {}
+    s = 0
+    for dic in args:
+        fr[fr_names[s]] = []
+        for i in range(len(dic)):
+            fr[fr_names[s]].append(len(dic[i])/(running_time / second))
+        s += 1
+    return(fr)
 
-def STS(data, dic):
+def STS(data, n, *args):
+    ''' n numero di dizionari che vengono passati'''
     data_cuts = np.split(data, 5)
     autocorr_splits = []
     for data_cut in data_cuts:
         autocorr_splits.append(signal.correlate(data_cut, data_cut, mode='full')/len(data_cut))
     autocorr_mean = np.mean(autocorr_splits, axis=0)
-    fr = single_firingrate(dic)
-    fr_averaged = np.mean(fr)
+    dics_names = ['fr%d'%k for k in range(n)]
+    dics = {}
+    for i in range(len(args)):
+        dics[dics_names[i]] = args[i]
+##cerca di capire come farlo
+    fr = single_firingrate(n, fr[])
+    print(fr)
+    fr_names = ['fr%d'%k for k in range(n)]
+    firing_rates = fr['fr0']
+    for i in range(1,n):
+        firing_rates.append(fr[fr_names[i]])
+
+
+    fr_averaged = np.mean(firing_rates)
     return autocorr_mean[len(autocorr_mean)//2]/fr_averaged**2
 
 start_scope()
@@ -58,6 +96,7 @@ g_GABA_I = 4*nS #conduttanza recettori inibitori su neuroni ini
 g_poiss_I = 0.4*nS #conduttanza per sinapsi esterne
 Vsyn_I = -70*mV #reversal tension sinapsi inibitorie
 C_m_I = 0.2*nF
+g_m_I = 20.*nS
 
 ##Neuroni eccitatori
 tau_m_E = 20*ms
@@ -66,6 +105,7 @@ g_AMPA_E = 0.19*nS
 g_AMPA_I = 0.3*nS   #conduttanza recettori eccitatori su neuroni inibitori
 g_poiss_E = 0.25*nS
 Vsyn_E = 0*mV
+g_m_E = 25. * nS
 
 #GABA
 tau_I_GABA = 1*ms
@@ -83,7 +123,7 @@ external_rate_on_INH = 5 * Hz
 
 
 eqs_I = '''
-dv/dt = (v0 - v)/tau_m_I - (I_syn + I_poiss)/C_m_I : volt (unless refractory)
+dv / dt = (g_m_I*(v-v0)-(I_syn+I_poiss))/C_m_I : volt (unless refractory)
 I_syn = I_AMPA_I + I_GABA_I : ampere
 I_poiss = g_poiss_I*v*s_ext : ampere
 
@@ -91,7 +131,7 @@ I_GABA_I = g_GABA_I*(v-Vsyn_I)*sI_GABA : ampere
 dxI_GABA/dt = -xI_GABA/tau_r_GABA : 1
 dsI_GABA/dt = (xI_GABA - sI_GABA)/tau_d_GABA : 1
 
-I_AMPA_I = g_GABA_I*r*(v-Vsyn_E)*sI_AMPA : ampere
+I_AMPA_I = g_AMPA_I*r*(v-Vsyn_E)*sI_AMPA : ampere
 dxI_AMPA/dt = -xI_AMPA/tau_r_AMPA : 1
 dsI_AMPA/dt = (xI_AMPA - sI_AMPA)/tau_d_AMPA : 1
 
@@ -100,7 +140,7 @@ ds_ext/dt = (x_ext-s_ext)/tau_d_AMPA : 1
 '''
 
 eqs_E = '''
-dv/dt = (v0 - v)/tau_m_E - (I_syn + I_poiss)/C_m_E : volt (unless refractory)
+dv/dt = (g_m_E*(v-v0)-(I_syn+I_poiss))/C_m_E : volt (unless refractory)
 I_syn = I_GABA_E + I_AMPA_E : ampere
 I_poiss = g_poiss_E*v*s_ext : ampere
 
@@ -108,7 +148,7 @@ I_GABA_E = g_GABA_E*(v-Vsyn_I)*sE_GABA : ampere
 dxE_GABA/dt = -xE_GABA/tau_r_GABA : 1
 dsE_GABA/dt = (xE_GABA - sE_GABA)/tau_d_GABA : 1
 
-I_AMPA_E = g_GABA_E*r*(v-Vsyn_E)*sE_AMPA : ampere
+I_AMPA_E = g_AMPA_E*r*(v-Vsyn_E)*sE_AMPA : ampere
 dxE_AMPA/dt = -xE_AMPA/tau_r_AMPA : 1
 dsE_AMPA/dt = (xE_AMPA - sE_AMPA)/tau_d_AMPA : 1
 
@@ -199,12 +239,13 @@ r_E = PopulationRateMonitor(G_E)
 M_I = SpikeMonitor(G_I)
 M_E = SpikeMonitor(G_E)
 
-run(running_time)
+run(running_time, report=ProgressBar(), report_period=1*second)
 
 elapsed_time = time.time() - start_time
 
 pop_osc = r_I.smooth_rate(window = 'gaussian', width = 1*ms)[5000:] / Hz
 pop_osc_E = r_E.smooth_rate(window = 'gaussian', width = 1*ms)[5000:] / Hz
+pop_osc_tot = pop_osc + pop_osc_E
 
 plt.figure(1)
 plt.xlim(1000,1200)
@@ -227,19 +268,22 @@ plt.ylim(0,20)
 plot(M_E.t/ms, M_E.i, '.')
 ylabel('Neuron index');
 
+#i dizionari finali avranno nomi tipo fr0, fr1 etc etc
+firing_rates = single_firingrate(2, M_I.spike_trains(), M_E.spike_trains())
+
 plt.figure(3)
 subplot(1,2,1)
-plt.hist(single_firingrate(M_I.spike_trains()), density=True, bins=50)
+plt.hist(firing_rates['fr0'], density=True, bins=50)
 xlabel('Frequency[Hz]')
 ylabel('Fraction of cell');
 
 subplot(1,2,2)
-plt.hist(single_firingrate(M_E.spike_trains()), density=True, bins=50)
+plt.hist(firing_rates['fr1'], density=True, bins=50)
 xlabel('Frequency[Hz]');
 
-#freq, spectr = powerspectrum(pop_osc)
-freq, spectr = signal.welch(pop_osc, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc)/n_split))
-sts = STS(pop_osc, M_I.spike_trains())
+
+freq, spectr = signal.welch(pop_osc_tot, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc)/n_split))
+sts_tot = STS(pop_osc_tot, 2, M_I.spike_trains(), M_E.spike_trains())
 
 
 plt.figure(4)

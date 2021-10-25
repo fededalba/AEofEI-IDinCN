@@ -81,7 +81,7 @@ tau_r_GABA = 0.5*ms
 tau_d_GABA = 5*ms
 
 tau_I_AMPA = 1*ms
-tau_r_AMPA = 0.5*ms
+tau_r_AMPA = 0.2*ms
 tau_d_AMPA = 2*ms
 
 #dv/dt = (v0 - v)/tau_m - (I_syn + I_poiss)/C_m : volt (unless refractory)
@@ -99,7 +99,7 @@ ds_ext/dt = (x_ext-s_ext)/tau_d_AMPA : 1
 '''
 
 G = NeuronGroup(N, eqs, threshold = 'v>theta', reset = 'v = v_reset', refractory = 1*ms, method = 'rk2')
-G.v = [v_reset]*N
+G.v = v0 + (v_reset - v0) * rand(len(G_I))
 
 Wrec = tau_m/tau_r_GABA
 S = Synapses(G, G, on_pre = 'x += Wrec', delay = tau_I_GABA)
@@ -109,7 +109,7 @@ S.connect(condition = 'i!=j', p=0.2)
 
 #P = PoissonInput(target=G, target_var='x_ext', N=800, rate=15*Hz, weight=tau_m/tau_r_AMPA)
 
-external_rate_on_INH = 15 * Hz
+external_rate_on_INH = 5 * Hz
 external_rate_I = Equations('''
 rate_1 = external_rate_on_INH*200 : Hz
 ''')
@@ -140,12 +140,12 @@ r_I = PopulationRateMonitor(G)
 run(duration, report=ProgressBar(), report_period=1*second)
 
 elapsed_time = time.time() - start_time
-pop_osc = r_I.smooth_rate(window = 'gaussian', width = 1*ms)[20000:] / Hz
+pop_osc = r_I.smooth_rate(window = 'gaussian', width = 0.5*ms)[5000:] / Hz
 
 plt.figure(1)
 subplot(1,2,1)
 plt.xlim(1000,1200)
-plot(r_I.t[20000:] / ms, pop_osc)
+plot(r_I.t[5000:] / ms, pop_osc)
 #plot(statemon1.t/ms, statemon1.I_poiss[0])
 xlabel('Time(ms)')
 ylabel('Population frequency');

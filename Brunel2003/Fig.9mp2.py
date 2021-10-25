@@ -53,6 +53,7 @@ g_GABA_I = 4*nS #conduttanza recettori inibitori su neuroni ini
 g_poiss_I = 0.4*nS #conduttanza per sinapsi esterne
 Vsyn_I = -70*mV #reversal tension sinapsi inibitorie
 C_m_I = 0.2*nF
+g_m_I = 20.*nS
 
 ##Neuroni eccitatori
 tau_m_E = 20*ms
@@ -61,6 +62,7 @@ g_AMPA_E = 0.19*nS
 g_AMPA_I = 0.3*nS   #conduttanza recettori eccitatori su neuroni inibitori
 g_poiss_E = 0.25*nS
 Vsyn_E = 0*mV
+g_m_E = 25. * nS
 
 #GABA
 tau_I_GABA = 1*ms
@@ -85,7 +87,7 @@ def running_sim(r):
     #in questo modello, i neuroni inibitori ricevono sia input eccitatori dal network eccitatorio
     #sia input eccitatori da processi poissoniani esterni
     eqs_I = '''
-    dv/dt = (v0 - v)/tau_m_I - (I_syn + I_poiss)/C_m_I : volt (unless refractory)
+    dv / dt = (g_m_I*(v-v0)-(I_syn+I_poiss))/C_m_I : volt (unless refractory)
     I_syn = I_AMPA_I + I_GABA_I : ampere
     I_poiss = g_poiss_I*v*s_ext : ampere
 
@@ -104,7 +106,7 @@ def running_sim(r):
     ##definisco le equazioni per i neuroni eccitatori
     #I neuroni eccitatori ricevono gli input inibitori e i processi poissoniani.
     eqs_E = '''
-    dv/dt = (v0 - v)/tau_m_E - (I_syn + I_poiss)/C_m_E : volt (unless refractory)
+    dv/dt = (g_m_E*(v-v0)-(I_syn+I_poiss))/C_m_E : volt (unless refractory)
     I_syn = I_GABA_E + I_AMPA_E : ampere
     I_poiss = g_poiss_E*v*s_ext : ampere
 
@@ -157,7 +159,7 @@ def running_sim(r):
     WextI = (tau_m_I)/tau_r_AMPA
     WextE = (tau_m_E)/tau_r_AMPA
 
-    if (external_rate_on_INH / Hz) > 10 or (external_rate_on_EXC / Hz) > 10:
+    if (external_rate_on_INH / Hz) >= 10 or (external_rate_on_EXC / Hz) >= 10:
         external_rate_E = Equations('''
                                     rate_0 = external_rate_on_EXC*100 : Hz
                                     ''')
