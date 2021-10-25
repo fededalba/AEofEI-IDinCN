@@ -66,7 +66,7 @@ def STS(data, n, *args):
     dics_names = ['fr%d'%k for k in range(n)]
     dics = {}
     for i in range(len(args)):
-        dics[dics_names[i]] = args[i]
+        dics[dics_names[i]] 1= args[i]
 ##cerca di capire come farlo
     fr = single_firingrate(n, fr[])
     print(fr)
