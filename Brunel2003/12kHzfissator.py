@@ -10,6 +10,10 @@ import multiprocessing
 import time
 from scipy import signal
 from brian2 import *
+import brian2.numpy_ as np
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 class ProgressBar(object):
     def __init__(self, toolbar_width=40):
@@ -42,42 +46,53 @@ n_split = 20        #numero di split con cui dividere i dati per applicare il we
 num_medie = 10
 
 control_values = np.linspace(0., 1., 8)
-r = control_values[6]       #scelgo quale parametro di r studiare
+r = control_values[1]       #scelgo quale parametro di r studiare
 
-def single_firingrate(n, *args):
-    '''n è il numero di dizionari che vengono passati '''
-    fr_names = ['fr%d'%k for k in range(n)]
-    fr = {}
-    s = 0
-    for dic in args:
-        fr[fr_names[s]] = []
-        for i in range(len(dic)):
-            fr[fr_names[s]].append(len(dic[i])/(running_time / second))
-        s += 1
-    return(fr)
+chiamata = 1
 
-def STS(data, n, *args):
-    ''' n numero di dizionari che vengono passati'''
-    data_cuts = np.split(data, 5)
-    autocorr_splits = []
-    for data_cut in data_cuts:
-        autocorr_splits.append(signal.correlate(data_cut, data_cut, mode='full')/len(data_cut))
-    autocorr_mean = np.mean(autocorr_splits, axis=0)
-    dics_names = ['fr%d'%k for k in range(n)]
-    dics = {}
-    for i in range(len(args)):
-        dics[dics_names[i]] 1= args[i]
-##cerca di capire come farlo
-    fr = single_firingrate(n, fr[])
-    print(fr)
-    fr_names = ['fr%d'%k for k in range(n)]
-    firing_rates = fr['fr0']
-    for i in range(1,n):
-        firing_rates.append(fr[fr_names[i]])
+def single_firingrate(dic):
+    firingrates = []
+    for i in range(len(dic)):
+        firingrates.append(len(dic[i])/(running_time / second))
+    mean_fr = np.mean(firingrates)
+    print(f'firing rate medio è {mean_fr}')
+    return(firingrates)
 
 
-    fr_averaged = np.mean(firing_rates)
-    return autocorr_mean[len(autocorr_mean)//2]/fr_averaged**2
+def STS(*args):
+    '''Funzione che prende i tempi di spikes di più networki e ne calcola l'sts'''
+    #sto sbagliando qualcosa....
+    global chiamata
+    total_spiketimes = []
+    for arg in args:
+        total_spiketimes.append(arg)
+
+    flat_spiketimes = [item for sublist in total_spiketimes for item in sublist]
+    bins_width = np.linspace(0, int(running_time/ms), int(running_time/ms))
+
+    plt.figure(chiamata+10)
+    plt.title('Istantaneuos firing rate in 1ms bin')
+    plt.xlabel('time[ms]')
+    plt.ylabel('network activity')
+    hist, bin_edges, patches = plt.hist(flat_spiketimes, bins=bins_width)
+
+    firing_rates = hist / second
+
+    #now we compute the autocorrelation
+    autocorrelation = signal.correlate(firing_rates[500:] / Hz, firing_rates[500:] / Hz, mode='same')/len(hist)
+    plt.figure(15+chiamata)
+    plt.title('autocorrelation')
+    plt.plot(autocorrelation)
+
+    adim_firingrates = np.sort(firing_rates / Hz)
+    mean_firingrates = np.mean(adim_firingrates)
+
+    print(f'la autocorrelazione alla {chiamata}° è: {autocorrelation[len(autocorrelation)//2]}')
+    print(f'il firing rate medio alla {chiamata}° è: {mean_firingrates}')
+    chiamata += 1
+    return autocorrelation[len(autocorrelation)//2]/mean_firingrates**2
+    
+    
 
 start_scope()
 start_time = time.time()
@@ -198,7 +213,7 @@ if (external_rate_on_INH / Hz) >= 10 or (external_rate_on_EXC / Hz) >= 10:
     external_rate_I = Equations('''
                                 rate_1 = external_rate_on_INH*200 : Hz
                                 ''')
-    
+
     poisson_group_onI = ['p_I%d'%i for i in range(4)]
     poisson_group_onE = ['p_E%d'%i for i in range(4)]
     for k in range(4):
@@ -243,15 +258,15 @@ run(running_time, report=ProgressBar(), report_period=1*second)
 
 elapsed_time = time.time() - start_time
 
-pop_osc = r_I.smooth_rate(window = 'gaussian', width = 1*ms)[5000:] / Hz
-pop_osc_E = r_E.smooth_rate(window = 'gaussian', width = 1*ms)[5000:] / Hz
-pop_osc_tot = pop_osc + pop_osc_E
+pop_osc_I = r_I.smooth_rate(window = 'gaussian', width = 0.5*ms)[10000:] / Hz
+pop_osc_E = r_E.smooth_rate(window = 'gaussian', width = 0.5*ms)[10000:] / Hz
+pop_osc_tot = pop_osc_I + pop_osc_E
 
 plt.figure(1)
-plt.xlim(1000,1200)
-plot(r_I.t[5000:] / ms, pop_osc)
-plot(r_E.t[5000:] / ms, pop_osc_E)
-#plot(statemon1.t/ms, statemon1.I_poiss[0])
+#plt.xlim(1000,1200)
+plt.title('population oscillation')
+plot(r_I.t[10000:] / ms, pop_osc_I)
+plot(r_E.t[10000:] / ms, pop_osc_E)
 xlabel('Time(ms)')
 ylabel('Population frequency');
 
@@ -259,35 +274,65 @@ plt.figure(2)
 subplot(1,2,1)
 plt.xlim(1000,1200)
 plt.ylim(0,20)
+plt.title('Rasterplot neuroni inibitori')
 plot(M_I.t/ms, M_I.i, '.')
 ylabel('Neuron index');
 
 subplot(1,2,2)
-plt.xlim(1000,1200)
-plt.ylim(0,20)
+plt.title('Rasterplot neuroni eccitatori')
+xlim(1000,1200)
+ylim(0,20)
 plot(M_E.t/ms, M_E.i, '.')
 ylabel('Neuron index');
 
-#i dizionari finali avranno nomi tipo fr0, fr1 etc etc
-firing_rates = single_firingrate(2, M_I.spike_trains(), M_E.spike_trains())
-
 plt.figure(3)
 subplot(1,2,1)
-plt.hist(firing_rates['fr0'], density=True, bins=50)
+title('firing rate network inibitorio')
+hist(single_firingrate(M_I.spike_trains()), density=True, bins=50)
 xlabel('Frequency[Hz]')
 ylabel('Fraction of cell');
 
 subplot(1,2,2)
-plt.hist(firing_rates['fr1'], density=True, bins=50)
+title('firing rate network eccitatorio')
+hist(single_firingrate(M_E.spike_trains()), density=True, bins=50)
 xlabel('Frequency[Hz]');
 
 
-freq, spectr = signal.welch(pop_osc_tot, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc)/n_split))
-sts_tot = STS(pop_osc_tot, 2, M_I.spike_trains(), M_E.spike_trains())
+freq, spectr_tot = signal.welch(pop_osc_tot, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc_tot)/n_split))
+sts_tot = STS(M_I.t/ms, M_E.t/ms)
+
+freq, spectr_I = signal.welch(pop_osc_I, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc_I)/n_split))
+sts_I = STS(M_I.t/ms)
+
+freq, spectr_E = signal.welch(pop_osc_E, fs=1./step_temporale, window='hann', nperseg=int(len(pop_osc_E)/n_split))
+sts_E = STS(M_E.t/ms)
+
+print(f'sts network: tot={sts_tot}, inib={sts_I}, exc={sts_E}')
 
 
 plt.figure(4)
-plt.xlabel('frequency[Hz]')
-plt.ylabel('Power spectrum')
+title('total power spectr')
+xlabel('frequency[Hz]')
+ylabel('Power spectrum')
 #plt.xlim(0,300.)
-plt.plot(freq, spectr)
+plot(freq, spectr_tot);
+
+plt.figure(5)
+subplot(1,2,1)
+title('inhibitory power spectr')
+xlabel('frequency[Hz]')
+ylabel('Power spectrum')
+#plt.xlim(0,300.)
+plot(freq, spectr_I);
+
+subplot(1,2,2)
+title('excitatory power spectr')
+xlabel('frequency[Hz]')
+#plt.xlim(0,300.)
+plot(freq, spectr_E);
+
+plt.figure(6)
+plot(pop_osc_tot)
+title('total network oscillation')
+xlabel('Time(ms)')
+ylabel('Population frequency');
