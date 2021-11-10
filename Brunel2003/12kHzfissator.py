@@ -46,7 +46,7 @@ n_split = 20        #numero di split con cui dividere i dati per applicare il we
 num_medie = 10
 
 control_values = np.linspace(0., 1., 8)
-r = control_values[1]       #scelgo quale parametro di r studiare
+r = control_values[4]       #scelgo quale parametro di r studiare
 
 chiamata = 1
 
@@ -60,37 +60,46 @@ def single_firingrate(dic):
 
 
 def STS(*args):
-    '''Funzione che prende i tempi di spikes di più networki e ne calcola l'sts'''
-    #sto sbagliando qualcosa....
+    '''Funzione che prende i tempi di spikes di più network e ne calcola l'sts.'''
     global chiamata
-    total_spiketimes = []
-    for arg in args:
-        total_spiketimes.append(arg)
+    #args contiene i tempi di spikes in una tupla generati dalla funzione SpikeMonitor
+    if len(args)>1:
+        total_spiketimes = []
+        for arg in args:
+            total_spiketimes.append(arg)
+        #metto tutti i tempi di spike in un unica lista
+        flat_spiketimes = [item for sublist in total_spiketimes for item in sublist]
 
-    flat_spiketimes = [item for sublist in total_spiketimes for item in sublist]
+    else:
+        flat_spiketimes = args[0]
+    #genero i bins larghi 1 ms
     bins_width = np.linspace(0, int(running_time/ms), int(running_time/ms))
 
     plt.figure(chiamata+10)
     plt.title('Istantaneuos firing rate in 1ms bin')
     plt.xlabel('time[ms]')
     plt.ylabel('network activity')
+    #hist mi conta le occorrenze in un bin di 1 ms, quindi il numero di spikes in 1 ms
     hist, bin_edges, patches = plt.hist(flat_spiketimes, bins=bins_width)
 
-    firing_rates = hist / second
+    #scarto i primi 500 ms
+    firing_rates = hist[500:] / second
 
     #now we compute the autocorrelation
-    autocorrelation = signal.correlate(firing_rates[500:] / Hz, firing_rates[500:] / Hz, mode='same')/len(hist)
+    '''autocorrelation = signal.correlate(firing_rates / Hz, firing_rates / Hz, mode='full')/len(hist)
     plt.figure(15+chiamata)
     plt.title('autocorrelation')
-    plt.plot(autocorrelation)
+    plt.plot(autocorrelation)'''
+    std = np.std(firing_rates / Hz)
 
-    adim_firingrates = np.sort(firing_rates / Hz)
-    mean_firingrates = np.mean(adim_firingrates)
+    mean_firingrates = np.mean(firing_rates / Hz)
 
-    print(f'la autocorrelazione alla {chiamata}° è: {autocorrelation[len(autocorrelation)//2]}')
+    #print(f'la autocorrelazione alla {chiamata}° è: {autocorrelation[len(autocorrelation)//2]}')
+    print(f'il std alla {chiamata}° è: {std}')
     print(f'il firing rate medio alla {chiamata}° è: {mean_firingrates}')
     chiamata += 1
-    return autocorrelation[len(autocorrelation)//2]/mean_firingrates**2
+    #return autocorrelation[len(autocorrelation)//2]/mean_firingrates**2
+    return (std/mean_firingrates)**2
     
     
 
@@ -133,8 +142,8 @@ tau_r_AMPA = 0.2*ms
 tau_d_AMPA = 2*ms
 
 # EXTERNAL INPUT
-external_rate_on_EXC = 5 * Hz
-external_rate_on_INH = 5 * Hz
+external_rate_on_EXC = 15 * Hz
+external_rate_on_INH = 15 * Hz
 
 
 eqs_I = '''
@@ -254,7 +263,22 @@ r_E = PopulationRateMonitor(G_E)
 M_I = SpikeMonitor(G_I)
 M_E = SpikeMonitor(G_E)
 
+ampamon_onI = StateMonitor(G_I, 'I_AMPA_I', record=True)
+gabamon_onI = StateMonitor(G_I, 'I_GABA_I', record=True)
+
+
 run(running_time, report=ProgressBar(), report_period=1*second)
+
+
+Iampa_neuronmean_onI = np.mean(ampamon_onI.I_AMPA_I / amp, axis=0)
+Igaba_neuronmean_onI = np.mean(gabamon_onI.I_GABA_I / amp, axis=0)
+
+Iampa_temporalmean_onI = np.mean(Iampa_neuronmean_onI[10000:])
+Igaba_temporalmean_onI = np.mean(Igaba_neuronmean_onI[10000:])
+
+ratio = Iampa_temporalmean_onI/Igaba_temporalmean_onI
+
+print(f'il rapport ampa gaba è {ratio}')
 
 elapsed_time = time.time() - start_time
 
@@ -272,16 +296,16 @@ ylabel('Population frequency');
 
 plt.figure(2)
 subplot(1,2,1)
-plt.xlim(1000,1200)
-plt.ylim(0,20)
+#plt.xlim(1000,1200)
+#plt.ylim(0,20)
 plt.title('Rasterplot neuroni inibitori')
 plot(M_I.t/ms, M_I.i, '.')
 ylabel('Neuron index');
 
 subplot(1,2,2)
 plt.title('Rasterplot neuroni eccitatori')
-xlim(1000,1200)
-ylim(0,20)
+#xlim(1000,1200)
+#ylim(0,20)
 plot(M_E.t/ms, M_E.i, '.')
 ylabel('Neuron index');
 

@@ -222,7 +222,7 @@ def running_sim(r):
     else:
         res = np.mean(max_psd_freq)
     print(f'FINISHED {pid}')
-    return(res)
+    return res
 
 #%%
 
