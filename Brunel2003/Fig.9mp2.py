@@ -59,11 +59,11 @@ def STS(*args):
     return (std/mean_firingrates)**2
     
 
-defaultclock.dt = 0.03*ms
+defaultclock.dt = 0.05*ms
 
 running_time = 10000*ms
 
-step_temporale= 0.00003
+step_temporale= 0.00005
 
 n_split = 20        #numero di split con cui dividere i dati per applicare il welch method
 num_medie = 5
