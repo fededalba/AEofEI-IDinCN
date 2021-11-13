@@ -46,7 +46,7 @@ n_split = 20        #numero di split con cui dividere i dati per applicare il we
 num_medie = 10
 
 control_values = np.linspace(0., 1., 8)
-r = control_values[4]       #scelgo quale parametro di r studiare
+r = control_values[2]       #scelgo quale parametro di r studiare
 
 chiamata = 1
 
@@ -142,8 +142,8 @@ tau_r_AMPA = 0.2*ms
 tau_d_AMPA = 2*ms
 
 # EXTERNAL INPUT
-external_rate_on_EXC = 15 * Hz
-external_rate_on_INH = 15 * Hz
+external_rate_on_EXC = 5 * Hz
+external_rate_on_INH = 5 * Hz
 
 
 eqs_I = '''

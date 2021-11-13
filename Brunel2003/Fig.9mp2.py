@@ -4,29 +4,59 @@ Created on Fri Oct  8 18:49:50 2021
 
 @author: Fede
 """
-#%%
+
 import os
 import multiprocessing
 import time
 from scipy import signal
 from brian2 import *
 
+class ProgressBar(object):
+    def __init__(self, toolbar_width=40):
+        self.toolbar_width = toolbar_width
+        self.ticks = 0
+    def __call__(self, elapsed, complete, start, duration):
+        if complete == 0.0:
+            # setup toolbar
+            sys.stdout.write("[%s]" % (" " * self.toolbar_width))
+            sys.stdout.flush()
+            sys.stdout.write("\b" * (self.toolbar_width + 1)) # return to start of˓→line, after '['
+        else:
+            ticks_needed = int(round(complete * self.toolbar_width))
+            if self.ticks < ticks_needed:
+                sys.stdout.write("-" * (ticks_needed-self.ticks))
+                sys.stdout.flush()
+                self.ticks = ticks_needed
+        if complete == 1.0:
+            sys.stdout.write("\n")
 
-def single_firingrate(dic):
-    firingrates = []
-    for i in range(len(dic)):
-        firingrates.append(len(dic[i])/(running_time / second))
-    return(firingrates)
+def STS(*args):
+    '''Funzione che prende i tempi di spikes di più network e ne calcola l'sts.'''
+    #args contiene i tempi di spikes in una tupla generati dalla funzione SpikeMonitor
+    if len(args)>1:
+        total_spiketimes = []
+        for arg in args:
+            total_spiketimes.append(arg)
+        #metto tutti i tempi di spike in un unica lista
+        flat_spiketimes = [item for sublist in total_spiketimes for item in sublist]
 
-def STS(data, dic):
-    data_cuts = np.split(data, 5)
-    autocorr_splits = []
-    for data_cut in data_cuts:
-        autocorr_splits.append(signal.correlate(data_cut, data_cut, mode='full')/len(data_cut))
-    autocorr_mean = np.mean(autocorr_splits, axis=0)
-    fr = single_firingrate(dic)
-    fr_averaged = np.mean(fr)
-    return autocorr_mean[len(autocorr_mean)//2]/fr_averaged**2
+    else:
+        flat_spiketimes = args[0]
+    #genero i bins larghi 1 ms
+    bins_width = np.linspace(0, int(running_time/ms), int(running_time/ms))
+
+    #hist mi conta le occorrenze in un bin di 1 ms, quindi il numero di spikes in 1 ms
+    hist, bin_edges = np.histogram(flat_spiketimes, bins=bins_width)
+
+    #scarto i primi 500 ms
+    firing_rates = hist[500:] / second
+
+    #now we compute the autocovariance in 0
+    std = np.std(firing_rates / Hz)
+
+    mean_firingrates = np.mean(firing_rates / Hz)
+
+    return (std/mean_firingrates)**2
     
 
 defaultclock.dt = 0.03*ms
@@ -75,11 +105,10 @@ tau_r_AMPA = 0.2*ms
 tau_d_AMPA = 2*ms
 
 # EXTERNAL INPUT
-external_rate_on_EXC = 15 * Hz
-external_rate_on_INH = 15 * Hz
+external_rate_on_EXC = 5 * Hz
+external_rate_on_INH = 5 * Hz
 
 def running_sim(r):
-    global all_spectr
     pid = os.getpid()
     print(f'RUNNING {pid}')
 
@@ -161,21 +190,21 @@ def running_sim(r):
 
     if (external_rate_on_INH / Hz) >= 10 or (external_rate_on_EXC / Hz) >= 10:
         external_rate_E = Equations('''
-                                    rate_0 = external_rate_on_EXC*100 : Hz
+                                    rate_0 = external_rate_on_EXC*200 : Hz
                                     ''')
         external_rate_I = Equations('''
-                                    rate_1 = external_rate_on_INH*100 : Hz
+                                    rate_1 = external_rate_on_INH*200 : Hz
                                     ''')
 
-        poisson_group_onI = ['p_I%d'%i for i in range(8)]
-        poisson_group_onE = ['p_E%d'%i for i in range(8)]
-        for k in range(8):
+        poisson_group_onI = [f'p_I%d_{pid}'%i for i in range(4)]
+        poisson_group_onE = [f'p_E%d_{pid}'%i for i in range(4)]
+        for k in range(4):
             globals()[poisson_group_onI[k]] = NeuronGroup(N_I, model=external_rate_I, threshold='rand()<rate_1*dt')
             globals()[poisson_group_onE[k]] = NeuronGroup(N_E, model=external_rate_E, threshold='rand()<rate_0*dt')
 
-        synapsesonI_names = ['s_I%d'%i for i in range(8)]
-        synapsesonE_names = ['s_E%d'%i for i in range(8)]
-        for k in range(8):
+        synapsesonI_names = [f's_I%d_{pid}'%i for i in range(4)]
+        synapsesonE_names = [f's_E%d_{pid}'%i for i in range(4)]
+        for k in range(4):
             globals()[synapsesonE_names[k]] = Synapses(globals()[poisson_group_onE[k]], G_E, on_pre='x_ext += WextE', delay=tau_I_AMPA)
             globals()[synapsesonE_names[k]].connect('i==j')
 
@@ -204,11 +233,18 @@ def running_sim(r):
     #monitoro il rate di firing della popolazione
     r_I = PopulationRateMonitor(G_I)
     M_I = SpikeMonitor(G_I)
+    M_E = SpikeMonitor(G_E)
+
+    ampamon_onI = StateMonitor(G_I, 'I_AMPA_I', record=list(range(0,99)))
+    gabamon_onI = StateMonitor(G_I, 'I_GABA_I', record=list(range(0,99)))
+
     store()
     max_psd_freq = []
+    sts = []
+    ratio = []
     for i in range(num_medie):
         restore()
-        run(running_time)
+        run(running_time, report=ProgressBar(), report_period=1*second)
 
         pop_osc = r_I.smooth_rate(window = 'gaussian', width = 1*ms)[20000:] / Hz
 
@@ -216,29 +252,49 @@ def running_sim(r):
         freq_max_index = np.argmax(spectr)
         max_psd_freq.append(freq[freq_max_index])
 
-    sts = STS(pop_osc, M_I.spike_trains())
-    if sts > 2.5:
-        res = 0.
-    else:
-        res = np.mean(max_psd_freq)
-    print(f'FINISHED {pid}')
-    return res
+        sts.append(STS(M_I.t/ms, M_E.t/ms))
 
-#%%
+        Iampa_neuronmean_onI = np.mean(ampamon_onI.I_AMPA_I / amp, axis=0)
+        Igaba_neuronmean_onI = np.mean(gabamon_onI.I_GABA_I / amp, axis=0)
+        Iampa_temporalmean_onI = np.mean(Iampa_neuronmean_onI[10000:])
+        Igaba_temporalmean_onI = np.mean(Igaba_neuronmean_onI[10000:])
+        ratio.append(np.abs(Iampa_temporalmean_onI/Igaba_temporalmean_onI))
+    
+    sts_mean = np.mean(sts)
+    balance = np.mean(ratio)
+    max_psd_freq_mean = np.mean(max_psd_freq)
+    res = (max_psd_freq_mean,sts_mean, balance)
+    print(f'FINISHED {pid}')
+    return max_psd_freq_mean,sts_mean, balance
+
+
 
 if __name__ == "__main__":
     start_time = time.time()
     num_proc = 8
-    ratio_currents = np.linspace(0., 0.5, 8)
-    control_parameter = np.linspace(0., 1., 8)
+    control_parameter = np.linspace(0.85, 0.95, 8)
+
+    #clear_cache('cython')
+
     with multiprocessing.Pool(num_proc) as p:
         results = p.map(running_sim, control_parameter)
 
     elapsed_time = time.time() - start_time
+    print(f'Tempo d esecuzione è {elapsed_time/60} minuti')
 
-#%%
+    numpy_array = np.array(results)
+    transpose = numpy_array.T
+    transpose_list = transpose.tolist()
+
+    max_frequencies, sts, ratio_currents = transpose_list
+
+    np.savetxt('6kHzInput_resultsfocused[0.85-0.95]', transpose_list)
+
     plt.figure(1)
     plt.xlabel('Iampa/Igaba')
     plt.ylabel('Frequency population')
-    plt.title('12k Hz Input')
-    plt.plot(ratio_currents, results, '.')
+    plt.title('6k Hz Input')
+    plt.scatter(ratio_currents, max_frequencies, c=sts, cmap='plasma')
+    plt.colorbar()
+
+    plt.show()
